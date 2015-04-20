@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -13,6 +12,39 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+type Message map[string]interface{}
+
+func (m Message) Type() string    { return m["type"].(string) }
+func (m Message) Channel() string { return m["channel"].(string) }
+func (m Message) User() string    { return m["user"].(string) }
+func (m Message) Text() string    { return m["text"].(string) }
+
+func (m Message) DirectMessage() bool {
+	if _, ok := m["reply_to"]; ok {
+		return false
+	}
+	msgType, ok := m["type"].(string)
+	if !ok {
+		return false
+	}
+	channel, ok := m["channel"].(string)
+	if !ok {
+		return false
+	}
+	if _, ok := m["user"].(string); !ok {
+		return false
+	}
+	if _, ok := m["text"].(string); !ok {
+		return false
+	}
+	return msgType == "message" && len(channel) > 0 && channel[0] == 'D'
+}
+
+func (m Message) String() string {
+	buf, _ := json.Marshal(m)
+	return string(buf)
+}
+
 var token string
 
 func init() {
@@ -21,17 +53,8 @@ func init() {
 	}
 }
 
-//{"type":"message","channel":"D04FLBCPZ","user":"U02D58RR5","text":"howdy ho","ts":"1429561458.000015","team":"T02D58RR3"}
-type Message struct {
-	Type    string
-	Channel string
-	User    string
-	Text    string
-	Ts      string
-	Team    string
-}
-
 func webSocketUrl() (url string, err error) {
+	log.Println("authenticating with rtm")
 	resp, err := http.Get("https://slack.com/api/rtm.start?token=" + token)
 	if err != nil {
 		return
@@ -52,77 +75,88 @@ func webSocketUrl() (url string, err error) {
 	return
 }
 
-func main() {
-	url, err := webSocketUrl()
+func connectToRtm() (ws *websocket.Conn, input, output chan Message, err error) {
+	var url string
+	url, err = webSocketUrl()
 	if err != nil {
-		log.Fatal(err)
+		return
 	}
-	origin := "http://localhost/"
-	ws, err := websocket.Dial(url, "", origin)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer ws.Close()
 
-	input := make(chan []byte)
+	log.Println("connecting to rtm")
+	origin := "http://localhost/"
+	ws, err = websocket.Dial(url, "", origin)
+	if err != nil {
+		return
+	}
+
+	input = make(chan Message)
 	go func() {
 		for {
-			var buf []byte
-			if err := websocket.Message.Receive(ws, &buf); err != nil {
-				log.Println(ws)
-				log.Fatal(err)
+			var msg Message
+			if err := websocket.JSON.Receive(ws, &msg); err != nil {
+				close(input)
+				return
 			}
-			if len(buf) > 0 {
-				input <- buf
+			if msg != nil {
+				input <- msg
 			}
 		}
 	}()
 
-	output := make(chan map[string]interface{})
+	output = make(chan Message)
 	go func() {
 		id := 0
 		for {
 			msg := <-output
 			msg["id"] = id
-			buf, _ := json.MarshalIndent(msg, "", "  ")
-			log.Println("sending message")
-			fmt.Println(string(buf))
 			if err := websocket.JSON.Send(ws, msg); err != nil {
-				log.Fatal(err)
+				close(output)
+				return
 			}
 			id++
 		}
 	}()
 
+	return
+}
+
+func main() {
+	ws, input, output, err := connectToRtm()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ws.Close()
+
 	messages := make(chan Message)
 	go func() {
 		for {
 			select {
-			case buf := <-input:
-				var msg Message
-				if err := json.Unmarshal(buf, &msg); err != nil {
-					log.Fatal("unable to parse rtm message")
-				}
-				switch msg.Type {
-				case "message":
-					if len(msg.Channel) > 0 && msg.Channel[0] == 'D' {
-						messages <- msg
+			case msg, ok := <-input:
+				// Handle disconects.
+				if !ok {
+					log.Println("disconnected from rtm")
+					ws, input, output, err = connectToRtm()
+					if err != nil {
+						log.Fatal(err)
 					}
-				default:
-					log.Println("ignoring", msg.Type)
+					defer ws.Close()
+					continue
+				}
+				if msg.DirectMessage() {
+					messages <- msg
 				}
 			case <-time.After(5 * time.Second):
-				log.Println("timeout, pinging")
-				output <- map[string]interface{}{"type": "ping"}
+				output <- Message{"type": "ping"}
 			}
 		}
 	}()
+
 	for m := range messages {
-		fmt.Println(m)
-		output <- map[string]interface{}{
-			"type":    m.Type,
-			"channel": m.Channel,
-			"text":    m.Text,
+		log.Println(m)
+		output <- Message{
+			"type":    m.Type(),
+			"channel": m.Channel(),
+			"text":    m.Text(),
 		}
 	}
 }
