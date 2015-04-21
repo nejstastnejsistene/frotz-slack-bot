@@ -1,10 +1,17 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/nejstastnejsistene/frotz-slack-bot/rtm"
+)
+
+var (
+	games = make(map[string]*Zork)
+	mutex sync.RWMutex
 )
 
 func onMessage(msg rtm.Message, respond chan rtm.Message) {
@@ -13,11 +20,42 @@ func onMessage(msg rtm.Message, respond chan rtm.Message) {
 	}
 	user := msg["user"].(string)
 	text := msg["text"].(string)
-	log.Printf("%s: \"%s\"\n", user, text)
-	respond <- rtm.Message{
-		"type":    msg["type"],
-		"channel": msg["channel"],
-		"text":    msg["text"],
+
+	var response string
+	defer func() {
+		respond <- rtm.NewResponse(msg, "```"+response+"```")
+	}()
+
+	mutex.RLock()
+	z := games[user]
+	mutex.RUnlock()
+
+	if z == nil {
+		z, output, err := StartZork("/home/peter/code/frotz/dfrotz", "/home/peter/code/zork-ai/ZORK1.DAT")
+		if err != nil {
+			response = fmt.Sprint("[error: %s]", err)
+		} else {
+
+			mutex.Lock()
+			games[user] = z
+			mutex.Unlock()
+
+			response = output
+		}
+	} else {
+		output, err := z.ExecuteCommand(text)
+		if err != nil {
+			mutex.Lock()
+			delete(games, user)
+			mutex.Unlock()
+
+			response = fmt.Sprint("[error: %s]", err)
+			if err == CleanExit {
+				response = "[process exitted cleanly]"
+			}
+		} else {
+			response = output
+		}
 	}
 }
 

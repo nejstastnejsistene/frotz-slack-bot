@@ -18,6 +18,14 @@ var (
 
 type Message map[string]interface{}
 
+func NewResponse(msg Message, text string) Message {
+	return Message{
+		"type":    "message",
+		"channel": msg["channel"],
+		"text":    text,
+	}
+}
+
 func (m Message) String() string {
 	buf, _ := json.Marshal(m)
 	return string(buf)
