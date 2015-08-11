@@ -31,9 +31,9 @@ func onMessage(msg rtm.Message, respond chan rtm.Message) {
 	mutex.RUnlock()
 
 	if z == nil {
-		z, output, err := StartZork("/home/peter/code/frotz/dfrotz", "/home/peter/code/zork-ai/ZORK1.DAT")
+		z, output, err := StartZork("dfrotz", "ZORK1.DAT")
 		if err != nil {
-			response = fmt.Sprint("[error: %s]", err)
+			response = fmt.Sprintf("[error: %s]", err)
 		} else {
 
 			mutex.Lock()
@@ -49,9 +49,9 @@ func onMessage(msg rtm.Message, respond chan rtm.Message) {
 			delete(games, user)
 			mutex.Unlock()
 
-			response = fmt.Sprint("[error: %s]", err)
+			response = fmt.Sprintf("[error: %s]", err)
 			if err == CleanExit {
-				response = "[process exitted cleanly]"
+				response = "[process exited cleanly]"
 			}
 		} else {
 			response = output

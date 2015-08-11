@@ -63,7 +63,7 @@ func (z *Zork) ExecuteCommand(command string) (output string, err error) {
 	var ok bool
 	select {
 	case output, ok = <-z.stdout:
-		// The read will fail if the process exitted
+		// The read will fail if the process exited.
 		if !ok {
 			err = <-z.chErr
 		}
