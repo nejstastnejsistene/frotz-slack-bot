@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/nejstastnejsistene/frotz-slack-bot/rtm"
@@ -57,6 +58,13 @@ func onMessage(msg rtm.Message, respond chan rtm.Message) {
 			response = output
 		}
 	}
+
+	channel := msg["channel"].(string)
+	log.Printf("%s: > %s", channel, text)
+	for _, line := range strings.Split(response, "\n") {
+		log.Printf("%s: %s\n", channel, line)
+	}
+
 }
 
 func directMessage(m rtm.Message) bool {
